@@ -14,15 +14,3 @@ To install requirements, run
 ## ETF price data
 
 This script relies on having price data in a `data/` directory inside the repository directory. The data is not included in this repository, but you can download a zip file from my website [here](https://mdickens.me/materials/leveraged-etfs-data.zip).
-
-If you have an [Alpha Vantage](https://www.alphavantage.co/) API key, you can also download the data from Alpha Vantage by following these steps:
-
-1. Inside this repository, create a directory called `data`.
-1. Then create a file called `.env`.
-2. Inside `.env`, add this line:
-
-       ALPHAVANTAGE_API_KEY=<your API key goes here>
-
-3. Run `python avfetch.py`.
-
-You can do this with a free API key, but you're rate-limited to 25 requests per day. Fetching data for all ETFs requires running `avfetch.py` once per day for four days.
