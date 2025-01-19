@@ -1,12 +1,14 @@
 """
-
-historical-prices.py
---------------------
+old.py
+------
 
 Author: Michael Dickens <mdickens93@gmail.com>
 Created: 2021-02-05
 
-originally from programs/alphavantage/leveraged-etfs.py
+A (somewhat modified) copy of the script I originally used in 2021 to calculate the true cost of leveraged ETFs. The new and improved script is in true_cost.py.
+
+The reason there are two scripts is that I lost this one and wrote a new
+one, then later I found this one again.
 
 """
 
@@ -24,8 +26,8 @@ api_key = os.getenv("ALPHAVANTAGE_API_KEY")
 
 today = datetime(2021, 1, 1)
 NUM_YEARS = 5
-DAYS_PER_YEAR = 365  # this is what I had before but it's wrong
-# DAYS_PER_YEAR = 252
+# DAYS_PER_YEAR = 365  # this is what I had before but it's wrong
+DAYS_PER_YEAR = 252
 
 def get_tbills_old():
     """3 month T-bills"""
@@ -60,7 +62,6 @@ def get_price_history_alphavantage(ticker):
         ))
 
     result = http_response.json()
-    import ipdb; ipdb.set_trace()
     dailies = result["Time Series (Daily)"]
     price_series = {}
     for k in dailies:

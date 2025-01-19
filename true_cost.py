@@ -26,11 +26,10 @@ def days_per_year(year):
     return 365
 
 
-# If True, go back to 2016 and exclude all ETFs that have missing data.
-# If False, only go back to 2021 and include all ETFs.
-date_range = (datetime(2016, 1, 1), datetime(2021, 1, 4))
+# End date is 1-4 instead of 1-1 because 1-4 is the first trading day of the year.
+# date_range = (datetime(2016, 1, 1), datetime(2021, 1, 4))
 # date_range = (datetime(2021, 1, 1), datetime(2025, 1, 4))
-# date_range = (datetime(2016, 1, 1), datetime(2025, 1, 4))
+date_range = (datetime(2016, 1, 1), datetime(2025, 1, 4))
 
 
 def setup_globals():
@@ -183,6 +182,9 @@ def returns_to_prices(rets):
 
 
 def add_leverage(prices, leverage_ratio):
+    """Given a price series for a security, return the price series that you
+    would get from applying leverage to that security. Assumes the borrowing
+    rate equals the risk-free rate."""
     base_rets = prices_to_returns(prices)
     leveraged_rets = [
         leverage_ratio * ret - (leverage_ratio - 1) * rf
@@ -193,6 +195,7 @@ def add_leverage(prices, leverage_ratio):
 
 
 def simulate_return_stacking_v1(stocks, bonds, prop1, prop2):
+    """Simulate the return of a return stacked ETF that rebalances daily."""
     rf = tbill_daily_yields
     extra_leverage = prop1 + prop2 - 1
     simulated_prices = [1]
@@ -206,6 +209,9 @@ def simulate_return_stacking_v1(stocks, bonds, prop1, prop2):
 
 
 def simulate_return_stacking_v2(stocks, bonds, prop1, prop2):
+    """Simulate the return of a return stacked ETF that rebalances whenever the
+    allocations drift more than 5 percentage points away from the target
+    weights."""
     rf = tbill_daily_yields
     simulated_prices = [1]
     simulated_props = [(prop1, prop2)]
@@ -241,6 +247,10 @@ def simulate_return_stacking_v2(stocks, bonds, prop1, prop2):
 def calculate_true_cost(
     leveraged_etf, index_etf, leverage_ratio, excess_fee, print_style
 ):
+    """Calculate the true cost of a leveraged ETF as the difference in return
+    between the actual leveraged ETF and a simulated fund that levers up the
+    index ETF.
+    """
     extra_leverage = leverage_ratio - 1
     etf_prices = load_prices(leveraged_etf)
     index_prices = load_prices(index_etf)
@@ -260,6 +270,8 @@ def calculate_true_cost(
 def calculate_true_cost_inner(
     leveraged_etf, etf_prices, leveraged_index, extra_leverage, excess_fee, print_style
 ):
+    """Helper function for calculate_true_cost that performs the actual
+    calculations."""
     correl = correlation(
         prices_to_returns(etf_prices), prices_to_returns(leveraged_index)
     )
@@ -307,6 +319,8 @@ def calculate_true_cost_inner(
             price *= 1 - annual_cost
         return price
 
+    # I believe there's a closed form solution for this number, but it's
+    # complicated so it's easier to just do gradient descent.
     optimized_cost = optimize.minimize(
         lambda x: (price_after_cost(x) - etf_prices[year_bounds[-1][1]]) ** 2,
         0,
@@ -326,6 +340,7 @@ def calculate_true_cost_inner(
 
 
 def true_costs(print_style):
+    """Calculate true costs for a list of leveraged ETFs."""
     excess_costs = []
 
     # Note: EFA and EEM have high fees, I'm using the fee numbers for VEA and
@@ -443,4 +458,5 @@ def print_geometric_mean_improvements():
         print(f"| {name} | {100 * return_improvement(ra_ret/100, stdev/100, cost/100):.1f}% | {100 * return_improvement(aqr_ret/100, stdev/100, cost/100):.1f}% |")
 
 
-print_return_stacked_costs()
+print_true_costs()
+# print_return_stacked_costs()

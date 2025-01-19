@@ -27,6 +27,11 @@ def save_all_data(ticker):
     """
     def get_url(function):
         return f"https://www.alphavantage.co/query?apikey={api_key}&function={function}&symbol={ticker}&outputsize=full"
+
+    if os.path.exists(f"data/raw-{ticker}.json"):
+        print(f"Skipping fetch of {ticker} because data/raw-{ticker}.json already exists")
+        return None
+
     response = requests.get(get_url("TIME_SERIES_DAILY"))
     response.raise_for_status()
     daily_prices = response.json()
@@ -111,7 +116,15 @@ def build_adjusted_daily_prices(ticker):
 
 
 def test_adjustment():
-    with open(f"data/SPY.json", "r") as infile:
+    """Test that my adjusted price calculations look correct by comparing them
+    to Marketstack adjusted prices.
+
+    Note: Turns out my adjusted prices are right and Marketstack's are wrong so
+    this test produces a false negative. My numbers agree with Yahoo Finance
+    and Marketstack's numbers are clearly wrong (like the adjusted price does
+    not change when a dividend payment occurs).
+    """
+    with open(f"msdata/SPY.json", "r") as infile:
         json_data = json.load(infile)
     for row in json_data:
         row["date"] = datetime.strptime(row["date"].split("T")[0], "%Y-%m-%d")
@@ -138,11 +151,10 @@ def test_adjustment():
             print(f"{row['date'].strftime('%Y-%m-%d')}\t{row['close']:.2f}\t{row['adj_close']:.2f}\t{row['my_adj_close']:.2f}\t{row['dividend']}\t{error:.3f}")
 
 
-# TODO I believe Marketshares adjusted prices are wrong, they don't line up with dividends and don't agree with Yahoo Finance
+all_tickers = "SPY IJH IWM EFA VGK EWJ EEM SPXL UPRO UMDD URTY EFO EURL EZJ EET EDC RSSB TQQQ QQQ SSO EEM EET EDC RSSB GOVT VT NTSX IEF NTSI VEA VWO PSLDX".split()
 
+for ticker in all_tickers:
+    save_all_data(ticker)
 
-# for ticker in "PSLDX".split():
-    # save_all_data(ticker)
-
-for ticker in "SPY IJH IWM EFA VGK EWJ EEM SPXL UPRO UMDD URTY EFO EURL EZJ EET EDC RSSB TQQQ QQQ SSO EEM EET EDC RSSB GOVT VT NTSX IEF NTSI VEA VWO PSLDX".split():
+for ticker in all_tickers:
     build_adjusted_daily_prices(ticker)
