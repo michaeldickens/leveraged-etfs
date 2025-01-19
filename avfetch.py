@@ -23,7 +23,10 @@ api_key = os.getenv("ALPHAVANTAGE_API_KEY")
 
 def save_all_data(ticker):
     """
-    TIME_SERIES_DAILY_ADJUSTED endpoint requires a $50/month subscription, but we can reconstruct it for free.
+    TIME_SERIES_DAILY_ADJUSTED endpoint requires a $50/month subscription,
+    but we can reconstruct it for free by combining the TIME_SERIES_DAILY and
+    DIVIDENDS and SPLITS endpoints and then calculating adjusted prices
+    manually.
     """
     def get_url(function):
         return f"https://www.alphavantage.co/query?apikey={api_key}&function={function}&symbol={ticker}&outputsize=full"

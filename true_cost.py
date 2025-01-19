@@ -26,13 +26,19 @@ def days_per_year(year):
     return 365
 
 
-# End date is 1-4 instead of 1-1 because 1-4 is the first trading day of the year.
+# End date is 1-4 instead of 1-1 because 1-4 is the first trading day of the
+# year. Calculating returns for a year requires having the price for the first
+# day in the following year.
 # date_range = (datetime(2016, 1, 1), datetime(2021, 1, 4))
 # date_range = (datetime(2021, 1, 1), datetime(2025, 1, 4))
 date_range = (datetime(2016, 1, 1), datetime(2025, 1, 4))
 
 
 def setup_globals():
+    """
+    Set up global variables. If you want to change `date_range`, you need
+    to call this function again.
+    """
     global date_range, standard_dates, year_bounds, tbill_daily_yields
 
     # create:
@@ -74,11 +80,11 @@ def setup_globals():
             tbill_yield = float(row_dict["3 Mo"]) / 100
             tbill_yields[date] = tbill_yield
 
-    # Calculate yield for each trading day as follows:
-    # 1. calculate daily yield for every individual day. for non-trading days,
-    #    take the last known yield
-    # 2. for each trading day, take the cumulative daily yield for all days
-    #    since the last trading day
+    # calculate yield for each trading day as follows:
+    # 1. calculate daily interest for every individual day. for non-trading days,
+    #    use the last known interest rate
+    # 2. for each trading day, set the yield to equal the cumulative daily
+    #    interest for all days since the last trading day
     all_tbill_daily_yields = {}
     date = standard_dates[0]
     annualized_yield = tbill_yields[date]
@@ -103,6 +109,8 @@ setup_globals()
 
 
 def correlation(xs, ys):
+    # Originally I was gonna import numpy but why add a 36 megabyte dependency
+    # when I could write a 5 line function instead?
     xmean = sum(xs) / len(xs)
     ymean = sum(ys) / len(ys)
     xstd = (sum((x - xmean) ** 2 for x in xs) / len(xs)) ** 0.5
@@ -195,7 +203,16 @@ def add_leverage(prices, leverage_ratio):
 
 
 def simulate_return_stacking_v1(stocks, bonds, prop1, prop2):
-    """Simulate the return of a return stacked ETF that rebalances daily."""
+    """Simulate the return of a return stacked ETF that rebalances daily.
+
+    stocks: The price series for the first asset (probably stocks, but it can
+    e anything).
+
+    bonds: The price series for the second asset.
+
+    prop1, prop2: The proportion of the fund's liquidation value invested in
+    the first and second asset, respectively. Should add up to more than 1.
+    """
     rf = tbill_daily_yields
     extra_leverage = prop1 + prop2 - 1
     simulated_prices = [1]
@@ -211,24 +228,34 @@ def simulate_return_stacking_v1(stocks, bonds, prop1, prop2):
 def simulate_return_stacking_v2(stocks, bonds, prop1, prop2):
     """Simulate the return of a return stacked ETF that rebalances whenever the
     allocations drift more than 5 percentage points away from the target
-    weights."""
+    weights.
+
+    stocks: The price series for the first asset (probably stocks, but it can
+    e anything).
+
+    bonds: The price series for the second asset.
+
+    prop1, prop2: The proportion of the fund's liquidation value invested in
+    the first and second asset, respectively. Should add up to more than 1.
+
+    """
     rf = tbill_daily_yields
-    simulated_prices = [1]
-    simulated_props = [(prop1, prop2)]
+    liquidation_value = [1]
+    notional_values = [(prop1, prop2)]
     for i in range(1, len(stocks)):
-        vt_factor = stocks[i] / stocks[i - 1]
-        govt_factor = bonds[i] / bonds[i - 1]
+        stocks_factor = stocks[i] / stocks[i - 1]
+        bonds_factor = bonds[i] / bonds[i - 1]
         new_props = (
-            simulated_props[-1][0] * vt_factor,
-            simulated_props[-1][1] * govt_factor,
+            notional_values[-1][0] * stocks_factor,
+            notional_values[-1][1] * bonds_factor,
         )
         net_earnings = (new_props[0] + new_props[1]) - (
-            simulated_props[-1][0] + simulated_props[-1][1]
+            notional_values[-1][0] + notional_values[-1][1]
         )
         extra_leverage = (new_props[0] + new_props[1]) - 1
         cost_of_leverage = extra_leverage * rf[i - 1]
-        new_price = simulated_prices[-1] + net_earnings - cost_of_leverage
-        simulated_prices.append(new_price)
+        new_price = liquidation_value[-1] + net_earnings - cost_of_leverage
+        liquidation_value.append(new_price)
 
         # only rebalance if the allocation drifts by 5%
         rebalanced_new_props = (
@@ -239,9 +266,9 @@ def simulate_return_stacking_v2(stocks, bonds, prop1, prop2):
             if new_props[1] <= 0.95 * prop2 * new_price or new_props[1] >= 1.05 * prop2 * new_price
             else new_props[1],
         )
-        simulated_props.append(rebalanced_new_props)
+        notional_values.append(rebalanced_new_props)
 
-    return simulated_prices
+    return liquidation_value
 
 
 def calculate_true_cost(
@@ -250,6 +277,21 @@ def calculate_true_cost(
     """Calculate the true cost of a leveraged ETF as the difference in return
     between the actual leveraged ETF and a simulated fund that levers up the
     index ETF.
+
+    leveraged_etf: A string representing the ticker of the leveraged ETF.
+
+    index_etf: A string representing the ticker of the index ETF that can be
+    levered up to match the leveraged ETF.
+
+    leverage_ratio: The amount of leverage that the leveraged ETF uses (e.g.
+    leverage_ratio of 2 = 2:1 leverage).
+
+    excess_fee: The fee (expense ratio) of the leveraged ETF minus [the expense
+    ratio of the index ETF multiplied by leverage_ratio].
+
+    print_style: One of "avg" or "by_year". If "avg", print the average cost of
+    each ETF. If "by_year", print a table showing the annual cost for each ETF
+    in each year.
     """
     extra_leverage = leverage_ratio - 1
     etf_prices = load_prices(leveraged_etf)
@@ -298,7 +340,6 @@ def calculate_true_cost_inner(
     # #2 is how my article did it originally. I believe #4 is the best.
 
     avg_deficit = sum(excess_costs) / len(excess_costs)
-
     etf_total_ret = etf_prices[year_bounds[-1][1]] / etf_prices[year_bounds[0][0]] - 1
     leveraged_index_total_ret = (
         leveraged_index[year_bounds[-1][1]] / leveraged_index[year_bounds[0][0]] - 1
@@ -460,3 +501,4 @@ def print_geometric_mean_improvements():
 
 print_true_costs()
 # print_return_stacked_costs()
+# print_geometric_mean_improvements()

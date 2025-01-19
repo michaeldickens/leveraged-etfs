@@ -2,8 +2,8 @@
 
 Scripts used to calculate [the true cost of leveraged ETFs](https://mdickens.me/2021/03/04/true_cost_of_leveraged_etfs/).
 
-- avfetch.py: Fetch historical data using the Alpha Vantage API.
 - true_cost.py: The main script that calculates ETF costs and performs other calculations.
+- avfetch.py: Fetch historical data using the Alpha Vantage API.
 - mvfetch.py (unused): Fetch historical data using the Marketstack API.
 - old.py (unused): A copy of the script I used for the original 2021 version of my [article](https://mdickens.me/2021/03/04/true_cost_of_leveraged_etfs/).
 
