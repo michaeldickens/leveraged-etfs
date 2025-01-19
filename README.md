@@ -17,7 +17,8 @@ This script relies on having price data in a `data/` directory inside the reposi
 
 If you have an [Alpha Vantage](https://www.alphavantage.co/) API key, you can also download the data from Alpha Vantage by following these steps:
 
-1. Inside this repository, create a file called `.env`.
+1. Inside this repository, create a directory called `data`.
+1. Then create a file called `.env`.
 2. Inside `.env`, add this line:
 
        ALPHAVANTAGE_API_KEY=<your API key goes here>
