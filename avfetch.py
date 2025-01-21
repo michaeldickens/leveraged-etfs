@@ -57,6 +57,8 @@ def save_all_data(ticker):
             "splits": splits
         }, outfile)
 
+    print("Successfully fetched", ticker)
+
 
 def build_adjusted_daily_prices(ticker):
     if not os.path.exists(f"data/raw-{ticker}.json"):
@@ -154,7 +156,11 @@ def test_adjustment():
             print(f"{row['date'].strftime('%Y-%m-%d')}\t{row['close']:.2f}\t{row['adj_close']:.2f}\t{row['my_adj_close']:.2f}\t{row['dividend']}\t{error:.3f}")
 
 
-all_tickers = "SPY IJH IWM EFA VGK EWJ EEM SPXL UPRO UMDD URTY EFO EURL EZJ EET EDC RSSB TQQQ QQQ SSO EEM EET EDC RSSB GOVT VT NTSX IEF NTSI VEA VWO PSLDX".split()
+main_tickers = "SPY IJH IWM EFA VGK EWJ EEM SPXL UPRO UMDD URTY EFO EURL EZJ EET EDC TQQQ QQQ SSO EEM EET EDC RSSB GOVT VT NTSX IEF NTSI VEA".split()
+
+optional_tickers = "VWO PSLDX IAU GDE UTWO UFIV UTEN UTHY AGG VTI VXUS".split()
+
+all_tickers = main_tickers + optional_tickers
 
 for ticker in all_tickers:
     save_all_data(ticker)
