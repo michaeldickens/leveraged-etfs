@@ -360,13 +360,13 @@ def return_stacking_quarterly_rebalance(securities, target_weights):
     return liquidation_value
 
 
-def return_stack(tickers_or_prices, target_weights, rebalance_method):
+def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False):
     """Simulate the return of a return stacked ETF that rebalances whenever the
     allocations drift more than 5% away from the target
     weights.
     """
     raw_prices = [
-        load_prices(x) if isinstance(x, str) else x
+        load_prices(x, "close") if isinstance(x, str) else x
         for x in tickers_or_prices
     ]
     dividends = [
@@ -383,6 +383,15 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method):
         for i in range(len(prices)):
             prices[i] *= splits[i]
 
+    if drip:
+        # reinvest dividends into the fund that paid the dividends
+        raw_prices = [
+            load_prices(x, "adj_close") if isinstance(x, str) else x
+            for x in tickers_or_prices
+        ]
+        dividends = [[0] * len(x) for x in raw_prices]
+        splits = [[1] * len(x) for x in raw_prices]
+
     # calculate rebalance days
     rebalance_days = []
     for i, date in enumerate(standard_dates):
@@ -393,8 +402,6 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method):
         elif rebalance_method in ["daily", "5pct"]:
             rebalance_days.append((i, date))
     rebalance_days = set([x[0] for x in rebalance_days])
-
-
 
     rf = tbill_daily_yields
     liquidation_value = [1]
@@ -620,7 +627,7 @@ def print_return_stacked_costs():
                 load_treasury_futures("30 Yr"),
             ],
             [0.62, 0.38, 0.02, 0.25, 0.25, 0.25, 0.25],
-            "5pct"
+            "5pct",
         ),
     )
 
@@ -632,8 +639,8 @@ def print_return_stacked_costs():
     govt = load_prices("GOVT")
     excess_fee = (0.20 - 0.09 * 0.9 - 0.05 * 0.6) / 100
     calculate_true_cost_inner(
-        "NTSX", 0.4, excess_fee, "avg", ntsx,
-        return_stack(["SPY", load_treasury_futures("Total")], [0.9, 0.6], "quarterly")
+        "NTSX", 0.5, excess_fee, "avg", ntsx,
+        return_stack([load_prices("SPY"), load_treasury_futures("Total")], [0.9, 0.6], "quarterly", drip=True)
     )
 
 
