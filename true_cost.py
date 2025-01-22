@@ -77,13 +77,11 @@ def setup_globals(start_date, end_date):
     # create tbill_daily_yields: list of daily yields for 3-month T-bills,
     # to represent the risk-free rate
     with open("data/Treasury.csv", "r") as infile:
-        reader = csv.reader(infile)
-        header = next(reader)
+        reader = csv.DictReader(infile)
         tbill_yields = {}
         for row in reader:
-            row_dict = dict(zip(header, row))
-            date = datetime.strptime(row_dict["Date"], "%m/%d/%Y")
-            tbill_yield = float(row_dict["3 Mo"]) / 100
+            date = datetime.strptime(row["Date"], "%m/%d/%Y")
+            tbill_yield = float(row["3 Mo"]) / 100
             tbill_yields[date] = tbill_yield
 
     # calculate yield for each trading day as follows:
@@ -143,8 +141,11 @@ def load_prices(ticker, column="adj_close"):
         json_data = json.load(infile)
         # adj_close is adjusted for dividends and splits, so no need to account
         # for them manually
+        for x in json_data:
+            if column not in x:
+                print(f"Warning: {ticker} does not have {column} on date {x['date']}.")
         prices = {
-            datetime.strptime(x["date"].split("T")[0], "%Y-%m-%d"):
+            datetime.strptime(x["date"], "%Y-%m-%d"):
             x[column] / x["close"] if column == "dividend" else x[column]
             for x in json_data
         }
@@ -225,13 +226,11 @@ def get_treasury_prices(maturity_str):
     # to but not exactly N years of maturity, whereas this method gives the
     # price for the bond with exactly N years of maturity.
     with open("data/Treasury.csv", "r") as infile:
-        reader = csv.reader(infile)
-        header = next(reader)
+        reader = csv.DictReader(infile)
         tbill_yields = {}
         for row in reader:
-            row_dict = dict(zip(header, row))
-            date = datetime.strptime(row_dict["Date"], "%m/%d/%Y")
-            yield_ = float(row_dict[maturity_str]) / 100
+            date = datetime.strptime(row["Date"], "%m/%d/%Y")
+            yield_ = float(row[maturity_str]) / 100
             tbill_yields[date] = yield_
 
     maturity_years = {
@@ -265,13 +264,11 @@ def load_treasury_futures(maturity_str):
     }[maturity_str]
 
     with open("data/Treasury-Futures.csv", "r") as infile:
-        reader = csv.reader(infile)
-        header = next(reader)
+        reader = csv.DictReader(infile)
         bond_prices = {}
         for row in reader:
-            row_dict = dict(zip(header, row))
-            date = datetime.strptime(row_dict["Effective date"], "%m/%d/%Y")
-            price = row_dict[maturity_col]
+            date = datetime.strptime(row["Effective date"], "%m/%d/%Y")
+            price = row[maturity_col]
             if price != "":
                 bond_prices[date] = float(price)
 
@@ -361,9 +358,22 @@ def return_stacking_quarterly_rebalance(securities, target_weights):
 
 
 def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False):
-    """Simulate the return of a return stacked ETF that rebalances whenever the
-    allocations drift more than 5% away from the target
-    weights.
+    """Simulate the return of a return stacked ETF.
+
+    tickers_or_prices: A list where each item is either a ticker symbol or a
+    list of prices.
+
+    target_weights: The proportions of the fund's liquidation value invested in
+    each security. Can add up to more than 1.
+
+    rebalance_method: One of the following strings:
+    - "daily": rebalance daily
+    - "quarterly": rebalance quarterly
+    - "5pct": rebalance whenever the allocation drifts by 5%
+
+    drip (default=False): If True, reinvest a security's dividends into itself.
+    Otherwise, reinvest dividends into the whole portfolio.
+
     """
     raw_prices = [
         load_prices(x, "close") if isinstance(x, str) else x
@@ -461,7 +471,6 @@ def calculate_true_cost(
     in each year.
     """
     extra_leverage = leverage_ratio - 1
-    etf_prices = load_prices(leveraged_etf)
     index_prices = load_prices(index_etf)
     if etf_prices is None or index_prices is None:
         return None
@@ -481,11 +490,13 @@ def calculate_true_cost_inner(
     extra_leverage,
     excess_fee,
     print_style,
-    etf_prices,
     leveraged_index,
+    etf_prices=None,
 ):
     """Helper function for calculate_true_cost that performs the actual
     calculations."""
+    if etf_prices is None:
+        etf_prices = load_prices(leveraged_etf_ticker)
     correl = correlation(
         prices_to_returns(etf_prices), prices_to_returns(leveraged_index)
     )
@@ -609,38 +620,70 @@ def print_true_costs():
 
 def print_return_stacked_costs():
     setup_globals(datetime(2024, 1, 1), datetime(2025, 1, 4))
-    rssb = load_prices("RSSB")
-    vt = load_prices("VT")
-    # equal-weighted bond ladder has r=0.98 with GOVT
-    govt = load_prices("GOVT")
-    agg = load_prices("AGG")
     calculate_true_cost_inner(
-        "RSSB", 1, (0.36 - 0.03 * 0.62 - 0.08 * 0.38 - 0.05) / 100, "avg", rssb,
+        "RSSB", 1, (0.36 - 0.07 * 1 - 0.05) / 100, "avg",
         return_stack(
             [
-                "VTI",
-                "VXUS",
-                "SPY",
+                "VT",
                 load_treasury_futures("2 Yr"),
                 load_treasury_futures("5 Yr"),
                 load_treasury_futures("10 Yr"),
                 load_treasury_futures("30 Yr"),
             ],
-            [0.62, 0.38, 0.02, 0.25, 0.25, 0.25, 0.25],
+            [1, 0.25, 0.25, 0.25, 0.25],
             "5pct",
         ),
+        etf_prices=load_prices("RSSB", "NAV"),
+    )
+    calculate_true_cost_inner(
+        "RSSB", 1, (0.36 - 0.07 * 1 - 0.05) / 100, "avg",
+        return_stack(
+            [
+                "VT",
+                load_treasury_futures("2 Yr"),
+                load_treasury_futures("5 Yr"),
+                load_treasury_futures("10 Yr"),
+                load_treasury_futures("30 Yr"),
+            ],
+            [1, 0.25, 0.25, 0.25, 0.25],
+            "daily",
+        ),
+        etf_prices=load_prices("RSSB", "NAV"),
+    )
+    calculate_true_cost_inner(
+        "RSSB", 1, (0.36 - 0.07 * 1 - 0.05) / 100, "avg",
+        return_stack(
+            [
+                "VT",
+                load_treasury_futures("2 Yr"),
+                load_treasury_futures("5 Yr"),
+                load_treasury_futures("10 Yr"),
+                load_treasury_futures("30 Yr"),
+            ],
+            [1, 0.25, 0.25, 0.25, 0.25],
+            "quarterly",
+        ),
+        etf_prices=load_prices("RSSB", "NAV"),
     )
 
     setup_globals(datetime(2019, 1, 1), datetime(2025, 1, 4))
-    ntsx = load_prices("NTSX")
-    spy = load_prices("SPY")
-    qqq = load_prices("QQQ")
-    vt = load_prices("VT")
-    govt = load_prices("GOVT")
-    excess_fee = (0.20 - 0.09 * 0.9 - 0.05 * 0.6) / 100
     calculate_true_cost_inner(
-        "NTSX", 0.5, excess_fee, "avg", ntsx,
-        return_stack([load_prices("SPY"), load_treasury_futures("Total")], [0.9, 0.6], "quarterly", drip=True)
+        "NTSX", 0.5, (0.20 - 0.09 * 0.9 - 0.05 * 0.6) / 100, "avg",
+        return_stack(["SPY", load_treasury_futures("Total")], [0.9, 0.6], "quarterly"),
+        etf_prices=load_prices("NTSX", "NAV"),
+    )
+    calculate_true_cost_inner(
+        "NTSX", 0.5, (0.20 - 0.09 * 1 - 0.05 * 0.6) / 100, "avg",
+        return_stack(["SPY", load_treasury_futures("Total")], [1, 0.6], "quarterly"),
+        etf_prices=load_prices("NTSX", "NAV"),
+    )
+
+    setup_globals(datetime(2022, 1, 1), datetime(2025, 1, 4))
+    excess_fee = (0.20 - 0.08 * 0.9 - 0.05 * 0.6) / 100
+    calculate_true_cost_inner(
+        "NTSI", 0.5, excess_fee, "avg",
+        return_stack(["VXUS", load_treasury_futures("Total")], [0.9, 0.6], "quarterly"),
+        etf_prices=load_prices("NTSI", "NAV"),
     )
 
 

@@ -15,6 +15,7 @@ To install requirements, run
 
 This script relies on having price data in a `data/` directory inside the repository directory. The data is not included in this repository, but you can download a zip file from my website [here](https://mdickens.me/materials/leveraged-etfs-data.zip).
 
-- ETF historical prices downloaded from AlphaVantage.
+- ETF historical prices downloaded using AlphaVantage API.
 - Treasury yields downloaded from the US Treasury.
 - S&P Treasury Futures prices downloaded from the S&P Global website.
+- NAV data (in morningstar-<ticker>.csv) downloaded from Morningstar (who could've guessed?).

@@ -90,6 +90,15 @@ def build_adjusted_daily_prices(ticker):
             date += timedelta(days=1)
         daily_prices[date.strftime("%Y-%m-%d")]["split_factor"] = float(row["split_factor"])
 
+    if os.path.exists(f"data/morningstar-{ticker}.csv"):
+        with open(f"data/morningstar-{ticker}.csv", "r") as infile:
+            reader = csv.DictReader(infile)
+            for row in reader:
+                date = datetime.strptime(row["Date"], "%m/%d/%Y")
+                formatted_date = date.strftime("%Y-%m-%d")
+                if formatted_date in daily_prices:
+                    daily_prices[formatted_date]["NAV"] = float(row["NAV"])
+
     adj_ratio = 1
     split_factor = 1
     daily_prices_list = list(reversed(sorted(daily_prices.items(), key=lambda x: x[0])))
@@ -106,13 +115,16 @@ def build_adjusted_daily_prices(ticker):
     # put into Marketshares format
     adjusted_daily_prices = []
     for date, row in daily_prices_list:
-        adjusted_daily_prices.append({
+        data = {
             "date": date,
             "close": float(row["4. close"]),
             "adj_close": row["adj_close"],
             "dividend": row["dividend"],
             "split_factor": row["split_factor"],
-        })
+        }
+        if "NAV" in row:
+            data["NAV"] = row["NAV"]
+        adjusted_daily_prices.append(data)
 
     with open(f"data/adjusted-{ticker}.json", "w") as outfile:
         json.dump(adjusted_daily_prices, outfile)
