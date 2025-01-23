@@ -51,28 +51,26 @@ def setup_globals(start_date, end_date):
     # - standard_dates: list of all trading days in the date range
     # - year_bounds: list of tuples (start, end) giving the (inclusive)
     #   start and (exclusive) end of each year
-    with open("data/adjusted-SPY.json", "r") as infile:
+    with open("data/adjusted-SPY.csv", "r") as infile:
+        reader = csv.DictReader(infile)
         standard_dates = sorted(
-            [
-                datetime.strptime(x["date"].split("T")[0], "%Y-%m-%d")
-                for x in json.load(infile)
-            ]
+            [datetime.strptime(x["date"], "%Y-%m-%d") for x in reader]
         )
-        standard_dates = [
-            date
-            for date in standard_dates
-            if date >= date_range[0] and date <= date_range[1]
-        ]
-        year_bounds = []
-        prev_year_index = None
-        prev_year = None
-        for i, date in enumerate(standard_dates):
-            year = date.year
-            if year != prev_year:
-                if prev_year is not None:
-                    year_bounds.append((prev_year_index, i))
-                prev_year_index = i
-                prev_year = year
+    standard_dates = [
+        date
+        for date in standard_dates
+        if date >= date_range[0] and date <= date_range[1]
+    ]
+    year_bounds = []
+    prev_year_index = None
+    prev_year = None
+    for i, date in enumerate(standard_dates):
+        year = date.year
+        if year != prev_year:
+            if prev_year is not None:
+                year_bounds.append((prev_year_index, i))
+            prev_year_index = i
+            prev_year = year
 
     # create tbill_daily_yields: list of daily yields for 3-month T-bills,
     # to represent the risk-free rate
@@ -137,49 +135,56 @@ def return_improvement(mu, sigma, cost):
 
 
 def load_prices(ticker, column="adj_close"):
-    with open(f"data/adjusted-{ticker}.json", "r") as infile:
-        json_data = json.load(infile)
+    with open(f"data/adjusted-{ticker}.csv", "r") as infile:
+        reader = csv.DictReader(infile)
         # adj_close is adjusted for dividends and splits, so no need to account
         # for them manually
-        for x in json_data:
-            if column not in x:
-                print(f"Warning: {ticker} does not have {column} on date {x['date']}.")
         prices = {
-            datetime.strptime(x["date"], "%Y-%m-%d"):
-            x[column] / x["close"] if column == "dividend" else x[column]
-            for x in json_data
+            datetime.strptime(row["date"], "%Y-%m-%d"): float(row[column])
+            for row in reader
         }
 
-        earliest_date = min(prices.keys())
-        if earliest_date > date_range[0]:
-            print(f"{ticker} does not have data back to {date_range[0]}.")
-            return None
+    earliest_date = min(prices.keys())
+    if earliest_date > date_range[0]:
+        print(f"{ticker} does not have data back to {date_range[0]}.")
+        return None
 
-        if column in ["close", "adj_close"]:
-            # Normalize prices to start at 1
-            price0 = prices[standard_dates[0]]
-            prices = {date: price / price0 for date, price in prices.items()}
-        price_series = []
-        num_missing_dates = 0
-        for date in standard_dates:
-            if date in prices:
-                price_series.append(prices[date])
+    price_series = []
+    num_missing_dates = 0
+    for date in standard_dates:
+        if date in prices:
+            price_series.append(prices[date])
+        else:
+            if column in ["close", "adj_close", "split_factor"]:
+                # fill using the last known value
+                price_series.append(price_series[-1])
+                num_missing_dates += 1
+            elif column == "dividend":
+                # fill as zero
+                price_series.append(0)
             else:
-                if column in ["close", "adj_close", "split_factor"]:
-                    # fill using the last known value
-                    price_series.append(price_series[-1])
-                    num_missing_dates += 1
-                elif column == "dividend":
-                    # fill as zero
-                    price_series.append(0)
-                else:
-                    raise ValueError(f"Unknown column: {column}")
+                raise ValueError(f"Unknown column: {column}")
 
-        # allow one missing date per year before printing a warning
-        threshold = (date_range[1] - date_range[0]).days / 365
-        if num_missing_dates > threshold:
-            print(f"Warning: {ticker} has {num_missing_dates} missing dates.")
-        return price_series
+    # allow one missing date per year before printing a warning
+    threshold = (date_range[1] - date_range[0]).days / 365
+    if num_missing_dates > threshold:
+        print(f"Warning: {ticker} has {num_missing_dates} missing dates.")
+    return price_series
+
+
+def back_out_dividends(adj_prices, dividends):
+    """Given a list of adjusted prices and a list of dividends, return the
+    original prices."""
+    # Confirmed that this exactly reproduces prices from adj_prices.
+    adj_ratio = 1
+    prices = []
+    for i in reversed(range(len(adj_prices))):
+        price = adj_prices[i] / adj_ratio
+        new_price = price - dividends[i]
+        adj_ratio *= new_price / price
+        prices.append(price)
+
+    return list(reversed(prices))
 
 
 def prices_to_returns(prices):
@@ -376,8 +381,7 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
 
     """
     raw_prices = [
-        load_prices(x, "close") if isinstance(x, str) else x
-        for x in tickers_or_prices
+        load_prices(x, "close") if isinstance(x, str) else x for x in tickers_or_prices
     ]
     dividends = [
         load_prices(x, "dividend") if isinstance(x, str) else [0] * len(x)
@@ -386,6 +390,10 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
     splits = [
         load_prices(x, "split_factor") if isinstance(x, str) else [1] * len(x)
         for x in tickers_or_prices
+    ]
+    yields = [
+        [div / close for div, close in zip(dividends_list, raw_prices_list)]
+        for dividends_list, raw_prices_list in zip(dividends, raw_prices)
     ]
 
     # adjust prices for splits but not dividends
@@ -399,17 +407,19 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
             load_prices(x, "adj_close") if isinstance(x, str) else x
             for x in tickers_or_prices
         ]
-        dividends = [[0] * len(x) for x in raw_prices]
+        yields = [[0] * len(x) for x in raw_prices]
         splits = [[1] * len(x) for x in raw_prices]
 
     # calculate rebalance days
     rebalance_days = []
     for i, date in enumerate(standard_dates):
-        if rebalance_method == "quarterly" and date.month in [3, 6, 9, 12] and (
-            len(rebalance_days) == 0 or rebalance_days[-1][1].month != date.month
+        if (
+            "quarterly" in rebalance_method
+            and date.month in [3, 6, 9, 12]
+            and (len(rebalance_days) == 0 or rebalance_days[-1][1].month != date.month)
         ):
             rebalance_days.append((i, date))
-        elif rebalance_method in ["daily", "5pct"]:
+        else:
             rebalance_days.append((i, date))
     rebalance_days = set([x[0] for x in rebalance_days])
 
@@ -419,8 +429,7 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
     for i in range(1, len(raw_prices[0])):
         price_return_factors = [sec[i] / sec[i - 1] for sec in raw_prices]
         total_dividend = sum(
-            prop * div[i]
-            for prop, div in zip(notional_values[-1], dividends)
+            prop * div[i] for prop, div in zip(notional_values[-1], yields)
         )
         new_weights = [
             prop * factor
@@ -429,15 +438,26 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
         net_earnings = sum(new_weights) - sum(notional_values[-1])
         extra_leverage = sum(new_weights) - 1
         cost_of_leverage = extra_leverage * rf[i - 1]
-        new_price = liquidation_value[-1] + net_earnings + total_dividend - cost_of_leverage
+        new_price = (
+            liquidation_value[-1] + net_earnings + total_dividend - cost_of_leverage
+        )
         liquidation_value.append(new_price)
 
-        if rebalance_method == "5pct":
+        if "5pct" in rebalance_method:
             # only rebalance if the allocation drifts by 5%
             rebalanced_new_props = [
                 prop * new_price
                 if new_prop <= 0.95 * prop * new_price
                 or new_prop >= 1.05 * prop * new_price
+                else new_prop
+                for prop, new_prop in zip(target_weights, new_weights)
+            ]
+            notional_values.append(rebalanced_new_props)
+        elif "5pp" in rebalance_method:
+            # only rebalance if the allocation drifts by 5 percentage points
+            rebalanced_new_props = [
+                prop * new_price
+                if abs(new_prop - prop * new_price) > 0.05
                 else new_prop
                 for prop, new_prop in zip(target_weights, new_weights)
             ]
@@ -472,7 +492,7 @@ def calculate_true_cost(
     """
     extra_leverage = leverage_ratio - 1
     index_prices = load_prices(index_etf)
-    if etf_prices is None or index_prices is None:
+    if index_prices is None:
         return None
     leveraged_index = add_leverage(index_prices, leverage_ratio)
     return calculate_true_cost_inner(
@@ -480,7 +500,6 @@ def calculate_true_cost(
         extra_leverage,
         excess_fee,
         print_style,
-        etf_prices,
         leveraged_index,
     )
 
@@ -621,22 +640,29 @@ def print_true_costs():
 def print_return_stacked_costs():
     setup_globals(datetime(2024, 1, 1), datetime(2025, 1, 4))
     calculate_true_cost_inner(
-        "RSSB", 1, (0.36 - 0.07 * 1 - 0.05) / 100, "avg",
+        "RSSB",
+        1,
+        (0.36 - 0.03 * 0.64 - 0.08 * 0.36) / 100,
+        "avg",
         return_stack(
             [
-                "VT",
+                "VTI",
+                "VXUS",
                 load_treasury_futures("2 Yr"),
                 load_treasury_futures("5 Yr"),
                 load_treasury_futures("10 Yr"),
                 load_treasury_futures("30 Yr"),
             ],
-            [1, 0.25, 0.25, 0.25, 0.25],
-            "5pct",
+            [0.62, 0.38, 0.25, 0.25, 0.25, 0.25],
+            "5pp",
         ),
-        etf_prices=load_prices("RSSB", "NAV"),
+        etf_prices=load_prices("RSSB", "NAV With Dividend"),
     )
     calculate_true_cost_inner(
-        "RSSB", 1, (0.36 - 0.07 * 1 - 0.05) / 100, "avg",
+        "RSSB",
+        1,
+        (0.36 - 0.07 * 1) / 100,
+        "avg",
         return_stack(
             [
                 "VT",
@@ -646,45 +672,31 @@ def print_return_stacked_costs():
                 load_treasury_futures("30 Yr"),
             ],
             [1, 0.25, 0.25, 0.25, 0.25],
-            "daily",
+            "5pp",
         ),
-        etf_prices=load_prices("RSSB", "NAV"),
-    )
-    calculate_true_cost_inner(
-        "RSSB", 1, (0.36 - 0.07 * 1 - 0.05) / 100, "avg",
-        return_stack(
-            [
-                "VT",
-                load_treasury_futures("2 Yr"),
-                load_treasury_futures("5 Yr"),
-                load_treasury_futures("10 Yr"),
-                load_treasury_futures("30 Yr"),
-            ],
-            [1, 0.25, 0.25, 0.25, 0.25],
-            "quarterly",
-        ),
-        etf_prices=load_prices("RSSB", "NAV"),
+        etf_prices=load_prices("RSSB", "NAV With Dividend"),
     )
 
     setup_globals(datetime(2019, 1, 1), datetime(2025, 1, 4))
-    calculate_true_cost_inner(
-        "NTSX", 0.5, (0.20 - 0.09 * 0.9 - 0.05 * 0.6) / 100, "avg",
-        return_stack(["SPY", load_treasury_futures("Total")], [0.9, 0.6], "quarterly"),
-        etf_prices=load_prices("NTSX", "NAV"),
-    )
-    calculate_true_cost_inner(
-        "NTSX", 0.5, (0.20 - 0.09 * 1 - 0.05 * 0.6) / 100, "avg",
-        return_stack(["SPY", load_treasury_futures("Total")], [1, 0.6], "quarterly"),
-        etf_prices=load_prices("NTSX", "NAV"),
-    )
-
-    setup_globals(datetime(2022, 1, 1), datetime(2025, 1, 4))
-    excess_fee = (0.20 - 0.08 * 0.9 - 0.05 * 0.6) / 100
-    calculate_true_cost_inner(
-        "NTSI", 0.5, excess_fee, "avg",
-        return_stack(["VXUS", load_treasury_futures("Total")], [0.9, 0.6], "quarterly"),
-        etf_prices=load_prices("NTSI", "NAV"),
-    )
+    for print_type in ["avg", "by_year"]:
+        calculate_true_cost_inner(
+            "NTSX",
+            0.5,
+            (0.20 - 0.09 * 0.9) / 100,
+            print_type,
+            return_stack(
+                [
+                    "SPY",
+                    load_treasury_futures("2 Yr"),
+                    load_treasury_futures("5 Yr"),
+                    load_treasury_futures("10 Yr"),
+                    load_treasury_futures("30 Yr"),
+                ],
+                [0.9, 0.12, 0.12, 0.24, 0.12],
+                "quarterly 5pp",
+            ),
+            etf_prices=load_prices("NTSX", "NAV With Dividend"),
+        )
 
 
 def print_geometric_mean_improvements():

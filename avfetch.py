@@ -90,7 +90,9 @@ def build_adjusted_daily_prices(ticker):
             date += timedelta(days=1)
         daily_prices[date.strftime("%Y-%m-%d")]["split_factor"] = float(row["split_factor"])
 
+    has_NAV = False
     if os.path.exists(f"data/morningstar-{ticker}.csv"):
+        has_NAV = True
         with open(f"data/morningstar-{ticker}.csv", "r") as infile:
             reader = csv.DictReader(infile)
             for row in reader:
@@ -98,6 +100,7 @@ def build_adjusted_daily_prices(ticker):
                 formatted_date = date.strftime("%Y-%m-%d")
                 if formatted_date in daily_prices:
                     daily_prices[formatted_date]["NAV"] = float(row["NAV"])
+                    daily_prices[formatted_date]["NAV With Dividend"] = float(row["NAV With Dividend"])
 
     adj_ratio = 1
     split_factor = 1
@@ -122,12 +125,15 @@ def build_adjusted_daily_prices(ticker):
             "dividend": row["dividend"],
             "split_factor": row["split_factor"],
         }
-        if "NAV" in row:
+        if has_NAV:
             data["NAV"] = row["NAV"]
+            data["NAV With Dividend"] = row["NAV With Dividend"]
         adjusted_daily_prices.append(data)
 
-    with open(f"data/adjusted-{ticker}.json", "w") as outfile:
-        json.dump(adjusted_daily_prices, outfile)
+    with open(f"data/adjusted-{ticker}.csv", "w") as outfile:
+        writer = csv.DictWriter(outfile, fieldnames=adjusted_daily_prices[0].keys())
+        writer.writeheader()
+        writer.writerows(adjusted_daily_prices)
 
     return adjusted_daily_prices
 
