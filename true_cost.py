@@ -425,18 +425,18 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
 
     rf = tbill_daily_yields
     liquidation_value = [1]
-    notional_values = [target_weights]
+    notional_values = target_weights
     for i in range(1, len(raw_prices[0])):
         price_return_factors = [sec[i] / sec[i - 1] for sec in raw_prices]
         total_dividend = sum(
-            prop * div[i] for prop, div in zip(notional_values[-1], yields)
+            value * yield_[i] for value, yield_ in zip(notional_values, yields)
         )
         new_weights = [
             prop * factor
-            for prop, factor in zip(notional_values[-1], price_return_factors)
+            for prop, factor in zip(notional_values, price_return_factors)
         ]
-        net_earnings = sum(new_weights) - sum(notional_values[-1])
-        extra_leverage = sum(new_weights) - 1
+        net_earnings = sum(new_weights) - sum(notional_values)
+        extra_leverage = sum(notional_values) - liquidation_value[-1]
         cost_of_leverage = extra_leverage * rf[i - 1]
         new_price = (
             liquidation_value[-1] + net_earnings + total_dividend - cost_of_leverage
@@ -445,25 +445,29 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
 
         if "5pct" in rebalance_method:
             # only rebalance if the allocation drifts by 5%
-            rebalanced_new_props = [
+            notional_values = [
                 prop * new_price
                 if new_prop <= 0.95 * prop * new_price
                 or new_prop >= 1.05 * prop * new_price
                 else new_prop
                 for prop, new_prop in zip(target_weights, new_weights)
             ]
-            notional_values.append(rebalanced_new_props)
         elif "5pp" in rebalance_method:
             # only rebalance if the allocation drifts by 5 percentage points
-            rebalanced_new_props = [
+            notional_values = [
                 prop * new_price
                 if abs(new_prop - prop * new_price) > 0.05
                 else new_prop
                 for prop, new_prop in zip(target_weights, new_weights)
             ]
-            notional_values.append(rebalanced_new_props)
         elif i in rebalance_days:
-            notional_values.append([prop * new_price for prop in target_weights])
+            notional_values = [prop * new_price for prop in target_weights]
+        else:
+            # TODO: Previously I didn't have this line which I think was a bug,
+            # but the returns are identical with or without it, which I don't
+            # understand. Should only matter for quarterly rebalancing but even
+            # then the returns are identical.
+            notional_values = new_weights
 
     return liquidation_value
 
@@ -570,6 +574,8 @@ def calculate_true_cost_inner(
     ).x[0]
 
     if print_style == "avg":
+        import numpy as np
+        print(f"| Index = {((1 + np.mean(prices_to_returns(leveraged_index)))**(252) - 1) * 100:.6f}% |", end="")
         print(
             f"| {leveraged_etf_ticker} | {100 * optimized_cost / extra_leverage:.2f}% | {100 * (optimized_cost - excess_fee) / extra_leverage:.2f}% | {correl:.3f} |"
         )
