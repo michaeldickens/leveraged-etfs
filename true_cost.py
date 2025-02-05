@@ -256,13 +256,29 @@ def get_treasury_prices(maturity_str):
 
 
 def load_treasury_futures(maturity_str):
+    """Load the prices of treasury futures for a given maturity. Uses the S&P
+    U.S. Treasury Futures Index series.
+
+    maturity_str: One of "2 Yr", "5 Yr", "10 Yr", "Total", "30 Yr".
+    - "Total" is the S&P U.S. Treasury Bond Index.
+    - "30 Yr" is the S&P Ultra T-Bond Futures Total Return Index, which roughly
+      matches 30-year bonds but has somewhat varying maturities.
+
+    Downloaded directly from the S&P Global website.
+
+    Note: These return series do not include embedded borrowing costs; they
+    closely match the spot returns of the underlying bonds. The S&P 500 U.S.
+    Treasury Futures Excess Return Index series includes embedded borrowing
+    costs and thus represents the excess returns of bonds over T-bills (but not
+    all desired futures have reported Excess Return series).
+    """
     maturity_col = {
         "2 Yr": "S&P 2-Year U.S. Treasury Note Futures Total Return Index",
         "5 Yr": "S&P 5-Year U.S. Treasury Note Futures Total Return Index",
         "10 Yr": "S&P 10-Year U.S. Treasury Note Futures Total Return Index",
         # RSSB presentation benchmark uses US Treasury Bond Index as the 4th
-        # bond position, but I think Ultra Futures better matches the actual
-        # holding.
+        # bond position, but I think Ultra Futures ("30 Yr") better matches the
+        # actual holding.
         # https://www.returnstackedetfs.com/wp-content/uploads/2024/02/RSSB-Presentation.pdf
         "Total": "S&P U.S. Treasury Bond Index",
         "30 Yr": "S&P Ultra T-Bond Futures Total Return Index",
@@ -298,68 +314,6 @@ def add_leverage(prices, leverage_ratio):
     ]
     leveraged_prices = returns_to_prices(leveraged_rets)
     return leveraged_prices
-
-
-def return_stacking_daily_rebalance(securities, target_weights):
-    """Simulate the return of a return stacked ETF that rebalances daily.
-
-    securities: A list of lists where each sub-list is the price series for a
-    security.
-
-    target_weights: The proportions of the fund's liquidation value invested in each
-    security. Can add up to more than 1.
-    """
-    # TODO: this reinvests dividends into the thing that paid the dividend, but
-    # what it's supposed to do is reinvest the dividend into the whole
-    # portfolio
-    rf = tbill_daily_yields
-    extra_leverage = sum(target_weights) - 1
-    simulated_prices = [1]
-    for i in range(1, len(securities[0])):
-        security_rets = [sec[i] / sec[i - 1] - 1 for sec in securities]
-        cost_of_leverage = extra_leverage * rf[i - 1]
-        total_ret = (
-            sum(prop * ret for prop, ret in zip(target_weights, security_rets))
-            - cost_of_leverage
-        )
-        simulated_prices.append(simulated_prices[-1] * (1 + total_ret))
-    return simulated_prices
-
-
-def return_stacking_quarterly_rebalance(securities, target_weights):
-    """Simulate the return of a return stacked ETF that rebalances quarterly."""
-    # TODO: this reinvests dividends into the thing that paid the dividend, but
-    # what it's supposed to do is reinvest the dividend into the whole
-    # portfolio
-    rf = tbill_daily_yields
-    extra_leverage = sum(target_weights) - 1
-    liquidation_value = [1]
-    notional_values = [target_weights]
-    rebalance_days = []
-    for i, date in enumerate(standard_dates):
-        if date.month in [3, 6, 9, 12] and (
-            len(rebalance_days) == 0 or rebalance_days[-1][1].month != date.month
-        ):
-            rebalance_days.append((i, date))
-    rebalance_days = set([x[0] for x in rebalance_days])
-
-    for i in range(1, len(securities[0])):
-        security_ret_factors = [sec[i] / sec[i - 1] for sec in securities]
-        new_weights = [
-            prop * factor
-            for prop, factor in zip(notional_values[-1], security_ret_factors)
-        ]
-        net_earnings = sum(new_weights) - sum(notional_values[-1])
-        extra_leverage = sum(new_weights) - 1
-        cost_of_leverage = extra_leverage * rf[i - 1]
-        new_price = liquidation_value[-1] + net_earnings - cost_of_leverage
-        liquidation_value.append(new_price)
-
-        if i in rebalance_days:
-            new_weights = [prop * new_price for prop in target_weights]
-        notional_values.append(new_weights)
-
-    return liquidation_value
 
 
 def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False):
@@ -419,7 +373,7 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
             and (len(rebalance_days) == 0 or rebalance_days[-1][1].month != date.month)
         ):
             rebalance_days.append((i, date))
-        else:
+        elif "daily" in rebalance_method:
             rebalance_days.append((i, date))
     rebalance_days = set([x[0] for x in rebalance_days])
 
@@ -431,43 +385,35 @@ def return_stack(tickers_or_prices, target_weights, rebalance_method, drip=False
         total_dividend = sum(
             value * yield_[i] for value, yield_ in zip(notional_values, yields)
         )
-        new_weights = [
-            prop * factor
-            for prop, factor in zip(notional_values, price_return_factors)
+        new_notionals = [
+            value * factor
+            for value, factor in zip(notional_values, price_return_factors)
         ]
-        net_earnings = sum(new_weights) - sum(notional_values)
+        net_earnings = sum(new_notionals) - sum(notional_values)
         extra_leverage = sum(notional_values) - liquidation_value[-1]
         cost_of_leverage = extra_leverage * rf[i - 1]
-        new_price = (
-            liquidation_value[-1] + net_earnings + total_dividend - cost_of_leverage
-        )
+        old_price = liquidation_value[-1]
+        new_price = old_price + net_earnings + total_dividend - cost_of_leverage
         liquidation_value.append(new_price)
 
-        if "5pct" in rebalance_method:
-            # only rebalance if the allocation drifts by 5%
-            notional_values = [
-                prop * new_price
-                if new_prop <= 0.95 * prop * new_price
-                or new_prop >= 1.05 * prop * new_price
-                else new_prop
-                for prop, new_prop in zip(target_weights, new_weights)
-            ]
-        elif "5pp" in rebalance_method:
-            # only rebalance if the allocation drifts by 5 percentage points
-            notional_values = [
-                prop * new_price
-                if abs(new_prop - prop * new_price) > 0.05
-                else new_prop
-                for prop, new_prop in zip(target_weights, new_weights)
-            ]
-        elif i in rebalance_days:
+        rebalance = False
+        new_weights = [x / new_price for x in new_notionals]
+        if i not in rebalance_days:
+            rebalance = False
+        elif "5pct" in rebalance_method:
+            # only rebalance if the weights drift by a sum of 5%
+            drift = sum(
+                [abs(new - target) for new, target in zip(new_weights, target_weights)]
+            )
+            if drift / sum(target_weights) > 0.05:
+                rebalance = True
+        else:
+            rebalance = True
+
+        if rebalance:
             notional_values = [prop * new_price for prop in target_weights]
         else:
-            # TODO: Previously I didn't have this line which I think was a bug,
-            # but the returns are identical with or without it, which I don't
-            # understand. Should only matter for quarterly rebalancing but even
-            # then the returns are identical.
-            notional_values = new_weights
+            notional_values = new_notionals
 
     return liquidation_value
 
@@ -574,8 +520,6 @@ def calculate_true_cost_inner(
     ).x[0]
 
     if print_style == "avg":
-        import numpy as np
-        print(f"| Index = {((1 + np.mean(prices_to_returns(leveraged_index)))**(252) - 1) * 100:.6f}% |", end="")
         print(
             f"| {leveraged_etf_ticker} | {100 * optimized_cost / extra_leverage:.2f}% | {100 * (optimized_cost - excess_fee) / extra_leverage:.2f}% | {correl:.3f} |"
         )
@@ -607,6 +551,7 @@ def true_costs(print_style):
         ("EET", "EEM", 2, 0.95, 0.08),
         ("EDC", "EEM", 3, 1.13, 0.08),
         ("TQQQ", "QQQ", 3, 0.84, 0.20),
+        ("TMF", "TLT", 3, 1.04, 0.15),
     ]
 
     for ltic, itic, leverage, fee1, fee2 in tuples:
@@ -645,25 +590,7 @@ def print_true_costs():
 
 def print_return_stacked_costs():
     setup_globals(datetime(2024, 1, 1), datetime(2025, 1, 4))
-    calculate_true_cost_inner(
-        "RSSB",
-        1,
-        (0.36 - 0.03 * 0.64 - 0.08 * 0.36) / 100,
-        "avg",
-        return_stack(
-            [
-                "VTI",
-                "VXUS",
-                load_treasury_futures("2 Yr"),
-                load_treasury_futures("5 Yr"),
-                load_treasury_futures("10 Yr"),
-                load_treasury_futures("30 Yr"),
-            ],
-            [0.62, 0.38, 0.25, 0.25, 0.25, 0.25],
-            "5pp",
-        ),
-        etf_prices=load_prices("RSSB", "NAV With Dividend"),
-    )
+    sim_vt = return_stack(["VTI", "VXUS"], [0.62, 0.38], "never")
     calculate_true_cost_inner(
         "RSSB",
         1,
@@ -671,14 +598,14 @@ def print_return_stacked_costs():
         "avg",
         return_stack(
             [
-                "VT",
+                sim_vt,
                 load_treasury_futures("2 Yr"),
                 load_treasury_futures("5 Yr"),
                 load_treasury_futures("10 Yr"),
                 load_treasury_futures("30 Yr"),
             ],
             [1, 0.25, 0.25, 0.25, 0.25],
-            "5pp",
+            "daily 5pct",
         ),
         etf_prices=load_prices("RSSB", "NAV With Dividend"),
     )
@@ -699,13 +626,15 @@ def print_return_stacked_costs():
                     load_treasury_futures("30 Yr"),
                 ],
                 [0.9, 0.12, 0.12, 0.24, 0.12],
-                "quarterly 5pp",
+                "daily 5pct",
             ),
             etf_prices=load_prices("NTSX", "NAV With Dividend"),
         )
 
 
 def print_geometric_mean_improvements():
+    """Calculate improvement in geometric mean from using leverage, given
+    various projections of future returns for different asset classes."""
     tuples = [
         ("US large", 2.0, 5.9, 15.4),
         ("US small", 4.3, 0, 20.7),

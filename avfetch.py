@@ -174,9 +174,9 @@ def test_adjustment():
             print(f"{row['date'].strftime('%Y-%m-%d')}\t{row['close']:.2f}\t{row['adj_close']:.2f}\t{row['my_adj_close']:.2f}\t{row['dividend']}\t{error:.3f}")
 
 
-main_tickers = "SPY IJH IWM EFA VGK EWJ EEM SPXL UPRO UMDD URTY EFO EURL EZJ EET EDC TQQQ QQQ SSO EEM EET EDC RSSB GOVT VT NTSX IEF NTSI VEA".split()
+main_tickers = "SPY IJH IWM EFA VGK EWJ EEM SPXL UPRO UMDD URTY EFO EURL EZJ EET EDC TQQQ QQQ SSO EEM EET EDC RSSB GOVT VT NTSX IEF NTSI VEA TLT TMF TYD".split()
 
-optional_tickers = "VWO PSLDX IAU GDE UTWO UFIV UTEN UTHY AGG VTI VXUS".split()
+optional_tickers = "DBMF".split()
 
 all_tickers = main_tickers + optional_tickers
 
